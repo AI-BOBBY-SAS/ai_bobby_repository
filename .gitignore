@@ -1,0 +1,10 @@
+*/catboost_*
+.venv
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb_checkpoints
+catboost_info
+*.log
+*.joblib

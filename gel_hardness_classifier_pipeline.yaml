@@ -1,0 +1,252 @@
+# PIPELINE DEFINITION
+# Name: gel-strength-classification-pipeline
+# Description: Pipeline to train gel strength classifier.
+# Inputs:
+#    dataset_file_name: str
+#    model_save_location: str [Default: 'ai-bobby-gel-hardness-models']
+components:
+  comp-prepare-data:
+    executorLabel: exec-prepare-data
+    inputDefinitions:
+      parameters:
+        dataset_file_name:
+          parameterType: STRING
+        project_id:
+          defaultValue: ai-bobby-poc
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        prepared_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        prepared_labels:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      artifacts:
+        prepared_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        prepared_labels:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        model_bucket_name:
+          parameterType: STRING
+        model_name:
+          parameterType: STRING
+        project_id:
+          defaultValue: ai-bobby-poc
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-prepare-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - prepare_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas==1.5.3'\
+          \ 'numpy==1.24.4' 'google-cloud-storage==2.19.0' 'loguru==0.7.3' && \"$0\"\
+          \ \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef prepare_data(\n    dataset_file_name: str,\n    prepared_data:\
+          \ Output[Dataset],\n    prepared_labels: Output[Dataset],\n    project_id:\
+          \ str = \"ai-bobby-poc\",\n):\n    from google.cloud import storage\n  \
+          \  import pandas as pd\n    from loguru import logger\n\n    def categorize_gel_strength(dataframe:\
+          \ pd.DataFrame, column_name: str) -> pd.DataFrame:\n        \"\"\"\n   \
+          \     Categorizes a continuous column into gel strength categories.\n\n\
+          \        Parameters:\n        df (pd.DataFrame): Input DataFrame.\n    \
+          \    column_name (str): Name of the column to be transformed.\n\n      \
+          \  Returns:\n        pd.DataFrame: DataFrame with a new column `<column_name>_category`\
+          \ containing the categories.\n        \"\"\"\n        # Define the bins\
+          \ and labels\n        bins = [0, 1000, 5000, 1000000]\n        labels =\
+          \ [0, 1, 2] # Soft, Firm, Rigid\n\n        # Create a new column for the\
+          \ categories\n        category_column_name = f\"{column_name}_category\"\
+          \n        dataframe[category_column_name] = pd.cut(\n            dataframe[column_name],\
+          \ bins=bins, labels=labels, include_lowest=True\n        )\n\n        return\
+          \ dataframe\n\n\n    logger.info(f\"Downloading dataset: {dataset_file_name}\"\
+          )\n    # Download dataset from GCS path\n    storage_client = storage.Client(project=project_id)\n\
+          \    bucket = storage_client.bucket('ai-bobby-gel-hardness-datasets')\n\
+          \    blob = bucket.blob(dataset_file_name)\n    blob.download_to_filename(dataset_file_name)\n\
+          \    df = pd.read_csv(dataset_file_name)\n    logger.info(\"Dataset downloaded.\"\
+          )\n\n    logger.info(\"Changing column types and dropping unnecessary columns...\"\
+          )\n    # Define categorical and numerical columns\n    categorical_columns\
+          \ = ['Protein codes', 'Type of salt', 'Additives', 'Treatment code']\n \
+          \   numerical_columns = [\n        'Samples stored (\xB0C)',\n        'ionic\
+          \ strength (M)', \n        'Additives Concentration (%)',\n        'Protein\
+          \ Concentration (%)',\n        'pH',\n        'Heating temperature (\xB0\
+          C) for gel preparation',\n        'Heating/hold time (min)',\n        'Hardness/firmness/strength\
+          \ (g)'\n    ]\n\n    # Convert datatypes\n    for col in categorical_columns:\n\
+          \        df[col] = df[col].astype('object')\n    for col in numerical_columns:\n\
+          \        df[col] = df[col].astype('float64')\n\n    # Drop unnecessary columns\n\
+          \    columns_to_drop = [\n        'Citation',\n        'Citation Link',\n\
+          \        'Protein',\n        'Treatment condition code',\n        'Treatment\
+          \ condition value',\n        'Treatment temperature ( \xB0C)',\n       \
+          \ 'Treatment time (min)',\n        'Storage time (h)',\n        'If a gel\
+          \ can be formed (0-1)',\n    ]\n    df_clean = df.drop(columns=columns_to_drop,\
+          \ axis=1)\n    logger.info(\"Column types changed and unnecessary columns\
+          \ dropped.\")\n\n    logger.info(\"Defining X and y...\")\n    # Process\
+          \ target variable\n    df_clean = df_clean.dropna(subset=['Hardness/firmness/strength\
+          \ (g)'])\n    df_clean = categorize_gel_strength(df_clean, 'Hardness/firmness/strength\
+          \ (g)')\n    df_clean.drop(columns=['Hardness/firmness/strength (g)'], inplace=True)\n\
+          \n    # Split features and labels\n    X = df_clean.drop('Hardness/firmness/strength\
+          \ (g)_category', axis=1)\n    y = df_clean['Hardness/firmness/strength (g)_category']\n\
+          \n    # Save to outputs\n    X.to_csv(prepared_data.path, index=False)\n\
+          \    y.to_csv(prepared_labels.path, index=False)\n    logger.info(\"X and\
+          \ y defined and saved to outputs.\")\n    logger.info(\"Data preparation\
+          \ complete.\")\n\n"
+        image: python:3.10
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas==1.5.3'\
+          \ 'numpy==1.24.4' 'flaml[automl]==2.3.2' 'scikit-learn==1.5.2' 'google-cloud-storage==2.19.0'\
+          \ 'loguru==0.7.3' 'joblib==1.3.2' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n    prepared_data: Input[Dataset],\n    prepared_labels:\
+          \ Input[Dataset],\n    metrics: Output[Metrics],\n    model_artifact: Output[Model],\n\
+          \    model_name: str,\n    model_bucket_name: str,\n    project_id: str\
+          \ = \"ai-bobby-poc\",\n):\n    import pandas as pd\n    from flaml import\
+          \ AutoML\n    from loguru import logger\n    from sklearn.model_selection\
+          \ import train_test_split\n    from sklearn.metrics import recall_score,\
+          \ f1_score\n    from google.cloud import storage\n    import joblib\n\n\
+          \    logger.info(\"Reading training data...\")\n    X = pd.read_csv(prepared_data.path)\n\
+          \    y = pd.read_csv(prepared_labels.path).to_numpy()\n\n    # Train and\
+          \ evaluate\n    logger.info(\"Training and evaluating model...\")\n    X_train,\
+          \ X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)\n\
+          \    automl_settings = {\n        \"time_budget\": 540,  # total running\
+          \ time in seconds\n        \"metric\": 'log_loss',\n        \"task\": 'classification',\n\
+          \        \"estimator_list\": ['lgbm', 'rf', 'xgboost', 'extra_tree'],\n\
+          \        \"split_type\": 'stratified',\n        \"n_jobs\": -1,\n      \
+          \  \"verbose\": 0,\n        \"seed\": 42,\n        \"early_stop\": True\n\
+          \    }\n\n    model = AutoML(**automl_settings)\n    model.fit(X_train,\
+          \ y_train, task=\"classification\")\n    y_pred = model.predict(X_test)\n\
+          \    logger.info(\"Model training and evaluation complete.\")\n    logger.info(f\"\
+          Model: {model.best_estimator}\")\n    logger.info(f\"Best config: {model.best_config}\"\
+          )\n\n    # Save metrics\n    logger.info(\"Logging metrics...\")\n    recall\
+          \ = recall_score(y_test, y_pred, average='micro')\n    f1 = f1_score(y_test,\
+          \ y_pred, average='micro')\n    metrics.log_metric(\"recall\", recall)\n\
+          \    metrics.log_metric(\"f1_score\", f1)\n    logger.info(\"Metrics logged.\"\
+          )\n\n    # Save model\n    logger.info(\"Saving model...\")\n    model_file_name\
+          \ = f\"{model_name}.joblib\"\n    joblib.dump(model, model_file_name)\n\
+          \    logger.info(\"Model saved.\")\n\n    logger.info(f\"Uploading model\
+          \ to GCS bucket: {model_bucket_name}\")\n    client = storage.Client(project=project_id)\n\
+          \    bucket = client.bucket(model_bucket_name)\n    blob = bucket.blob(model_file_name)\n\
+          \    blob.upload_from_filename(model_file_name)\n    logger.info(f\"Model\
+          \ {model_file_name} uploaded to GCS.\")\n    # Register model data\n   \
+          \ model_artifact.uri = f\"gs://{model_bucket_name}/{model_file_name}\"\n\
+          \    model_artifact.metadata = {\n        \"estimator\": model.best_estimator,\n\
+          \        \"best_config\": model.best_config,\n        \"recall\": recall,\n\
+          \        \"f1_score\": f1\n    }\n    logger.info(\"Model training and evaluation\
+          \ complete.\")\n\n"
+        image: python:3.10
+pipelineInfo:
+  description: Pipeline to train gel strength classifier.
+  name: gel-strength-classification-pipeline
+root:
+  dag:
+    tasks:
+      prepare-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-prepare-data
+        inputs:
+          parameters:
+            dataset_file_name:
+              componentInputParameter: dataset_file_name
+        taskInfo:
+          name: prepare-data
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        dependentTasks:
+        - prepare-data
+        inputs:
+          artifacts:
+            prepared_data:
+              taskOutputArtifact:
+                outputArtifactKey: prepared_data
+                producerTask: prepare-data
+            prepared_labels:
+              taskOutputArtifact:
+                outputArtifactKey: prepared_labels
+                producerTask: prepare-data
+          parameters:
+            model_bucket_name:
+              componentInputParameter: model_save_location
+            model_name:
+              runtimeValue:
+                constant: gel_hardness_classifier_20241218_1215
+        taskInfo:
+          name: train-model
+  inputDefinitions:
+    parameters:
+      dataset_file_name:
+        parameterType: STRING
+      model_save_location:
+        defaultValue: ai-bobby-gel-hardness-models
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.11.0

@@ -1,0 +1,44 @@
+steps:
+# Build
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'build-docker-image'
+  args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/gel-hardness-prediction-app:latest', '.']
+# Push to Artifact Registry
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-image-to-artifact-registry'
+  waitFor: ['build-docker-image']
+  args:
+    ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/gel-hardness-prediction-app']
+# Deploy to cloud run
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  id: 'deploy-image-in-google-cloud-run'
+  waitFor: ['push-image-to-artifact-registry']
+  args:
+    - 'run'
+    - 'deploy'
+    - 'gel-hardness-prediction-app'
+    - '--image'
+    - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/gel-hardness-prediction-app:latest'
+    - '--region'
+    - 'us-central1'
+    - '--platform'
+    - 'managed'
+    - '--max-instances'
+    - '2'
+    - '--min-instances'
+    - '1'
+    - '--memory'
+    - '4Gi'
+    - '--cpu'
+    - '4'
+    - '--concurrency'
+    - '1'
+    - '--set-env-vars'
+    - 'PROJECT_ID=$PROJECT_ID'
+    - '--service-account'
+    - 'ai-bobby-gel-hardness-poc@ai-bobby-poc.iam.gserviceaccount.com'
+images:
+- 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/gel-hardness-prediction-app:latest'
+options:
+  logging: CLOUD_LOGGING_ONLY

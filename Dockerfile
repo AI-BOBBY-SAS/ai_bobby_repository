@@ -11,4 +11,4 @@ RUN uv sync
 
 EXPOSE 8080
 
-CMD ["uv", "run", "streamlit", "run", "src/app/main.py", "--server.port", "8080"]
+CMD ["uv", "run", "streamlit", "run", "src/app/main.py", "--server.port", "8080", "--theme.base", "light"]

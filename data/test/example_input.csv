@@ -1,0 +1,10 @@
+Protein codes,Protein Concentration (%),Treatment code,Additives,Additives Concentration (%),pH,Type of salt,ionic strength (M),Heating temperature (°C) for gel preparation,Heating/hold time (min),Samples stored (°C)
+10501,12,,,,5,,,90,30,4
+10501,12,,80203,0.5,5,,,90,30,4
+10501,12,,80203,1,5,,,90,30,4
+10501,12,,80203,2,5,,,90,30,4
+10501,12,,6,,,90,30,,,4
+10501,12,,80203,0.5,6,,,90,30,4
+10501,12,,80203,1,6,,,90,30,4
+10501,12,,80203,2,6,,,90,30,4
+10501,12,,,,7,,,90,30,4

@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from google.cloud import storage
 import joblib
+from loguru import logger
 
 # Replace with your GCP project ID and bucket names
 PROJECT_ID = "ai-bobby-poc"
@@ -32,37 +33,65 @@ def save_predictions(predictions, output_file):
     output_blob = output_bucket.blob(output_file)
     output_blob.upload_from_string(output_df.to_csv(index=False), content_type="text/csv")
 
+def reformat_predictions(predictions: list[int]) -> list[str]:
+    predictions_map = {
+        0: "Soft",
+        1: "Medium",
+        2: "Hard"
+    }
+    return [predictions_map[prediction] for prediction in predictions]
+
+
 # Streamlit app
-st.title("Gel Hardness Prediction App")
+st.title("🤖 Gel Hardness Prediction App 🤖")
+st.markdown(
+    """
+    ---
+
+    ## How to use this application
+
+    1. Select a trained model from the dropdown menu below. 
+    The list of models available are the ones stored in the Google Cloud Storage bucket `ai-bobby-gel-hardness-models`.
+    2. Upload a CSV file with the characteristics of the gel that were used to train the model.
+    The CSV file should have the same columns as the training data (see `data/test/example_input.csv` in the github repo for an example).
+    3. Click the "Predict" button to generate the predictions.
+    ---
+
+    """
+)
 
 # Model selection
 model_files = list_models()
-selected_model = st.selectbox("Select a trained model", model_files)
+st.markdown("#### Select a trained model from the bucket:")
+selected_model = st.selectbox("model selector", model_files, label_visibility="hidden")
 
 # File upload
-uploaded_file = st.file_uploader("Upload a CSV file for prediction", type="csv")
+st.markdown("#### Upload a CSV file for prediction:")
+uploaded_file = st.file_uploader("file selector", type="csv", label_visibility="hidden")
 
 if uploaded_file is not None:
     # Read the CSV file
+    logger.info("File uploaded.")
     df = pd.read_csv(uploaded_file)
+    logger.info(f"Dataframe created. Columns: {list(df.columns)}")
 
     # Load the selected model
     model = load_model(selected_model)
+    logger.info(f"Model {selected_model} loaded.")
 
-    # Make predictions
-    try:
-        predictions = model.predict(df)
-        st.success("Predictions generated successfully!")
-        st.dataframe(pd.DataFrame(predictions, columns=["Predictions"]), use_container_width=True)
+    predictions_button = st.button("Predict")
+    if predictions_button:
+        # Make predictions
+        try:
+            logger.info("Predicting...")
+            predictions = model.predict(df)
+            reformatted_predictions = reformat_predictions(predictions)
+            logger.info("Predictions generated successfully!")
 
-        # Save predictions (optional)
-        save_to_gcs = st.checkbox("Save predictions to GCS?")
-        if save_to_gcs:
-            output_filename = st.text_input("Enter output filename (e.g., predictions.csv):", "predictions.csv")
-            save = st.button("Save")
-            if save:
-                save_predictions(predictions, output_filename)
-                st.success(f"Predictions saved to gs://{OUTPUT_BUCKET_NAME}/{output_filename}")
-
-    except Exception as e:
-        st.error(f"Error generating predictions: {e}")
+            st.success("Predictions generated successfully!")
+            logger.info("Displaying predictions...")
+            st.dataframe(data=pd.DataFrame(reformatted_predictions, columns=["Predictions"]), use_container_width=True)
+            logger.info("Predictions displayed successfully!")
+        except Exception as e:
+            st.error(f"Error generating predictions: {e}")
+            logger.exception(f"Error generating predictions: {e}")
